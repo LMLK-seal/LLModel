@@ -53,6 +53,9 @@ You can install these libraries using pip: "pip install PyQt5 llama-cpp-python P
 
 This application requires a compatible GGUF model file to function. Make sure you have a suitable model before running the application. The model should be compatible with the llama-cpp-python library.
 
+GGUF libraries: 
+https://huggingface.co/models?library=gguf
+
 ## Contribution
 
 Contributions to improve the application are welcome. Please feel free to submit issues or pull requests to enhance functionality, fix bugs, or improve the user interface.
