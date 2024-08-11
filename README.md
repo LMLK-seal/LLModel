@@ -1,4 +1,4 @@
-# LLModel Chat
+# LLModel Chat (100% Private-Offline chat!)
 
 ![LLModel Chat Demo](https://github.com/LMLK-seal/LLModel/blob/main/LLModel.gif?raw=true)
 
