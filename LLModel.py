@@ -1,16 +1,19 @@
 import sys
 import os
 import re
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QTextEdit, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, 
+import requests
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QTextEdit, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
                              QWidget, QLabel, QSpinBox, QMessageBox, QComboBox, QFileDialog, QProgressBar)
 from PyQt5.QtGui import QFont, QPalette, QColor
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot
 import fitz  # PyMuPDF for PDF handling
+import pyttsx3  # Import the text-to-speech library
 
-class LlamaThread(QThread):
+class LlamaThread(QObject):
     response_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
     progress_signal = pyqtSignal(int)
+    finished = pyqtSignal()
 
     def __init__(self, model, prompt, max_tokens, temperature):
         super().__init__()
@@ -19,7 +22,8 @@ class LlamaThread(QThread):
         self.max_tokens = max_tokens
         self.temperature = temperature
 
-    def run(self):
+    @pyqtSlot()
+    def generate_response(self):
         try:
             print("LlamaThread: Generating response...")
             response = self.model(
@@ -40,6 +44,9 @@ class LlamaThread(QThread):
             self.response_signal.emit(full_text)
         except Exception as e:
             self.error_signal.emit(str(e))
+        finally:
+            self.finished.emit()
+
 
 class ChatWindow(QMainWindow):
     def __init__(self):
@@ -54,6 +61,9 @@ class ChatWindow(QMainWindow):
         self.model = None
         self.current_python_code = None
         self.uploaded_file_content = None
+        self.llama_thread = None  # Initialize the thread object
+        self.thread = None  # Initialize the QThread object
+        self.tts_engine = pyttsx3.init()  # Initialize the text-to-speech engine
         self.setup_ui()
 
     def setup_ui(self):
@@ -62,14 +72,11 @@ class ChatWindow(QMainWindow):
 
         layout = QVBoxLayout()
 
-        # Model and CUDA loading buttons
+        # Model loading button (CUDA-related code removed)
         load_layout = QHBoxLayout()
-        self.load_model_button = QPushButton("(2)-Load Model")
+        self.load_model_button = QPushButton("Load Model")
         self.load_model_button.clicked.connect(self.load_model)
-        self.load_cuda_button = QPushButton("(1)-Load CUDA Folder")
-        self.load_cuda_button.clicked.connect(self.load_cuda_folder)
         load_layout.addWidget(self.load_model_button)
-        load_layout.addWidget(self.load_cuda_button)
         layout.addLayout(load_layout)
 
         # File Upload Button
@@ -78,8 +85,7 @@ class ChatWindow(QMainWindow):
         layout.addWidget(self.upload_file_button)
 
         # Chat display
-        self.chat_display = QTextEdit()
-        self.chat_display.setReadOnly(True)
+        self.chat_display = ChatDisplayWidget(self.play_tts)  # Pass play_tts function
         layout.addWidget(self.chat_display)
 
         # Progress bar
@@ -158,22 +164,11 @@ class ChatWindow(QMainWindow):
         if model_path:
             try:
                 from llama_cpp import Llama
-                self.model = Llama(model_path=model_path, n_ctx=2048, n_gpu_layers=-1)
+                self.model = Llama(model_path=model_path, n_ctx=2048)  # No need for n_gpu_layers
                 QMessageBox.information(self, "Success", f"Model loaded successfully!\nPath: {model_path}")
                 self.send_button.setEnabled(True)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load the model: {str(e)}")
-
-    def load_cuda_folder(self):
-        cuda_folder = QFileDialog.getExistingDirectory(self, "Select CUDA Folder")
-        if cuda_folder:
-            os.environ['CUDA_PATH'] = cuda_folder
-            cuda_bin_path = os.path.join(cuda_folder, "bin")
-            if os.path.exists(cuda_bin_path):
-                os.environ['PATH'] = cuda_bin_path + os.pathsep + os.environ['PATH']
-                QMessageBox.information(self, "Success", f"CUDA folder set successfully!\nPath: {cuda_folder}")
-            else:
-                QMessageBox.warning(self, "Warning", f"CUDA bin directory not found at {cuda_bin_path}")
 
     def upload_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select File", "", "Text Files (*.txt);;PDF Files (*.pdf)")
@@ -201,30 +196,57 @@ class ChatWindow(QMainWindow):
         self.update_chat_display()
         self.input_field.clear()
 
+        # Stop any running thread before starting a new one
+        if self.thread and self.thread.isRunning():
+            self.thread.quit()
+            self.thread.wait()
+
+        # Prepare the prompt
+        prompt = self.prepare_prompt(user_input)
+
+        # Split long inputs into chunks
+        chunks = self.split_into_chunks(prompt)
+
+        for chunk in chunks:
+            self.process_chunk(chunk)
+
+    def prepare_prompt(self, user_input):
         prompt = "\n".join(self.conversation) + "\nAI:"
-        self.token_count += len(prompt.split())
-
-        if self.token_count >= self.max_tokens:
-            self.conversation = [self.system_prompt, self.conversation[-1]]
-            self.token_count = len("\n".join(self.conversation).split())
-            self.update_chat_display()
-
-        # Include uploaded file content in the prompt if available
+        
         if self.uploaded_file_content:
             prompt += f"\n\n**File Content:**\n{self.uploaded_file_content}"
+        
+        return prompt
 
-        self.llama_thread = LlamaThread(self.model, prompt, self.max_tokens - self.token_count, self.temperature)
+    def split_into_chunks(self, text, chunk_size=1000):
+        return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+    def process_chunk(self, chunk):
+        self.llama_thread = LlamaThread(self.model, chunk, min(self.max_tokens, 2043), self.temperature)
+        self.thread = QThread()
+        self.llama_thread.moveToThread(self.thread)
+        self.thread.started.connect(self.llama_thread.generate_response)
         self.llama_thread.response_signal.connect(self.handle_response)
         self.llama_thread.error_signal.connect(self.handle_error)
         self.llama_thread.progress_signal.connect(self.update_progress)
-        self.llama_thread.start()
+        self.llama_thread.finished.connect(self.on_thread_finished)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.finished.connect(self.llama_thread.deleteLater)
+        self.thread.start()
 
         self.send_button.setEnabled(False)
         self.progress_bar.setValue(0)
 
+    @pyqtSlot()
+    def on_thread_finished(self):
+        self.send_button.setEnabled(True)
+        self.progress_bar.setValue(100)
+
     def handle_response(self, response):
+        self.llama_thread.response_signal.disconnect(self.handle_response)  # Disconnect after using it
+
         if self.validate_response(response):
-            self.conversation.append(f"AI: {response}")
+            self.conversation.append(f"AI: {response}")  # Append the response with "AI: " prefix
             self.token_count += len(response.split())
             self.update_chat_display()
             self.check_for_python_code(response)
@@ -244,11 +266,23 @@ class ChatWindow(QMainWindow):
         self.progress_bar.setValue(value)
 
     def update_chat_display(self):
-        display_conversation = self.conversation[1:]  # Exclude system prompt from display
-        self.chat_display.setPlainText("\n\n".join(display_conversation))
-        self.chat_display.verticalScrollBar().setValue(self.chat_display.verticalScrollBar().maximum())
+        # Clear the existing messages
+        self.chat_display.clear()
+        # Add all messages to the chat display
+        for message in self.conversation[1:]:  # Skip the system prompt
+            if message.startswith("You: "):
+                self.chat_display.add_message("You", message[5:], False)
+            elif message.startswith("AI: "):
+                self.chat_display.add_message("AI", message[4:], True)
+            else:
+                self.chat_display.add_message("AI", message, True)
 
     def clear_conversation(self):
+        # Stop any running thread before clearing
+        if self.thread and self.thread.isRunning():
+            self.thread.quit()
+            self.thread.wait()
+
         self.conversation = [self.system_prompt]
         self.token_count = 0
         self.update_chat_display()
@@ -288,6 +322,44 @@ class ChatWindow(QMainWindow):
                 QMessageBox.information(self, "Success", f"Python code saved to {file_path}")
         else:
             QMessageBox.warning(self, "No Code", "No Python code available to download.")
+
+    def play_tts(self, text):
+        self.tts_engine.say(text)
+        self.tts_engine.runAndWait()
+
+class ChatDisplayWidget(QWidget):
+    def __init__(self, play_tts_function):  # Add play_tts_function as an argument
+        super().__init__()
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
+        self.play_tts_function = play_tts_function
+
+    def add_message(self, sender, text, with_play_button):
+        message_widget = QWidget()
+        message_layout = QHBoxLayout()
+        message_widget.setLayout(message_layout)
+
+        # Add sender label
+        sender_label = QLabel(f"{sender}:")
+        sender_label.setStyleSheet("font-weight: bold;")
+        message_layout.addWidget(sender_label)
+
+        # Add message text
+        message_label = QLabel(text)
+        message_label.setWordWrap(True)
+        message_layout.addWidget(message_label, 1)
+
+        if with_play_button:
+            play_button = QPushButton("Play")
+            play_button.setFixedSize(60, 35)
+            play_button.clicked.connect(lambda: self.play_tts_function(text))  # Call the passed function
+            message_layout.addWidget(play_button)
+
+        self.layout.addWidget(message_widget)
+
+    def clear(self):
+        for i in reversed(range(self.layout.count())):
+            self.layout.itemAt(i).widget().setParent(None)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
