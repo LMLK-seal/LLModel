@@ -2,7 +2,7 @@
 
 ![LLModel Chat Demo](https://github.com/LMLK-seal/LLModel/blob/main/LLModel.gif?raw=true)
 
-LLModel Chat is a PyQt5-based graphical user interface (GUI) application that allows users to interact with a local large language model (LLM) using the Llama library. This application provides a user-friendly interface for loading and using LLM models, engaging in conversations, and even processing uploaded text or PDF files as context for the AI responses.
+LLModel Chat is a CPU only PyQt5-based graphical user interface (GUI) application that allows users to interact with a local large language model (LLM) using the Llama library. This application provides a user-friendly interface for loading and using LLM models, engaging in conversations, and even processing uploaded text or PDF files as context for the AI responses.
 
 ## Concept and Features
 
@@ -11,13 +11,13 @@ The main concept behind LLModel Chat is to provide an easy-to-use interface for 
 Key features include:
 
 1. **Model Loading**: Users can load a local GGUF (GPT-Generated Unified Format) model file.
-2. **CUDA Support**: Option to set the CUDA folder for GPU acceleration.
-3. **File Upload**: Ability to upload and process text or PDF files as additional context for the AI.
-4. **Conversation Interface**: A chat-like interface for interacting with the AI model.
-5. **Adjustable Parameters**: Users can modify max tokens and temperature settings.
-6. **Code Extraction**: Automatically detects Python code in AI responses and allows downloading.
-7. **Progress Indication**: Shows the progress of AI response generation.
-8. **Conversation Management**: Options to clear the conversation history.
+2. **File Upload**: Ability to upload and process text or PDF files as additional context for the AI.
+3. **Conversation Interface**: A chat-like interface for interacting with the AI model.
+4. **Adjustable Parameters**: Users can modify max tokens and temperature settings.
+5. **Code Extraction**: Automatically detects Python code in AI responses and allows downloading.
+6. **Progress Indication**: Shows the progress of AI response generation.
+7. **Conversation Management**: Options to clear the conversation history.
+8. **Play response**: Options to play the AI response.
 
 ## Libraries and Dependencies
 
@@ -41,13 +41,12 @@ You can install these libraries using pip: "pip install PyQt5 llama-cpp-python P
 
 ## Using the Application
 
-1. **Load CUDA Folder** (Optional): If you have a CUDA-compatible GPU, click the "Load CUDA Folder" button and select your CUDA installation directory.
-2. **Load Model**: Click the "Load Model" button and select your GGUF model file.
-3. **Upload Context File** (Optional): You can upload a text or PDF file to provide additional context for the AI responses.
-4. **Start Chatting**: Type your message in the input field and click "Send" or press Enter.
-5. **Adjust Settings**: You can modify the max tokens and temperature using the controls at the bottom of the window.
-6. **Download Code**: If the AI generates Python code, you can download it using the "Download Code" button.
-7. **Clear Conversation**: Use the "Clear Conversation" button to start a new chat session.
+1. **Load Model**: Click the "Load Model" button and select your GGUF model file.
+2. **Upload Context File** (Optional): You can upload a text or PDF file to provide additional context for the AI responses.
+3. **Start Chatting**: Type your message in the input field and click "Send" or press Enter.
+4. **Adjust Settings**: You can modify the max tokens and temperature using the controls at the bottom of the window.
+5. **Download Code**: If the AI generates Python code, you can download it using the "Download Code" button.
+6. **Clear Conversation**: Use the "Clear Conversation" button to start a new chat session.
 
 ## Note
 
