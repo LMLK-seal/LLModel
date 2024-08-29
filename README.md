@@ -16,8 +16,9 @@ Key features include:
 4. **Adjustable Parameters**: Users can modify max tokens and temperature settings.
 5. **Code Extraction**: Automatically detects Python code in AI responses and allows downloading.
 6. **Progress Indication**: Shows the progress of AI response generation.
-7. **Conversation Management**: Options to clear the conversation history.
-8. **Play response**: Options to play the AI response.
+7. **Conversation Management**: Option to clear the conversation history.
+8. **Play response**: Option to play the AI response.
+9. **Copy text**: Option to copy the text of the AI response.
 
 ## Libraries and Dependencies
 
