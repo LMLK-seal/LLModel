@@ -3,7 +3,7 @@ import os
 import re
 import requests
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTextEdit, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
-                             QWidget, QLabel, QSpinBox, QMessageBox, QComboBox, QFileDialog, QProgressBar)
+                             QWidget, QLabel, QSpinBox, QMessageBox, QComboBox, QFileDialog, QProgressBar, QApplication)
 from PyQt5.QtGui import QFont, QPalette, QColor
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot
 import fitz  # PyMuPDF for PDF handling
@@ -200,6 +200,7 @@ class ChatWindow(QMainWindow):
         if self.thread and self.thread.isRunning():
             self.thread.quit()
             self.thread.wait()
+            self.thread = None  # Reset thread reference
 
         # Prepare the prompt
         prompt = self.prepare_prompt(user_input)
@@ -282,6 +283,7 @@ class ChatWindow(QMainWindow):
         if self.thread and self.thread.isRunning():
             self.thread.quit()
             self.thread.wait()
+            self.thread = None  # Reset thread reference
 
         self.conversation = [self.system_prompt]
         self.token_count = 0
@@ -333,6 +335,7 @@ class ChatDisplayWidget(QWidget):
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
         self.play_tts_function = play_tts_function
+        self.clipboard = QApplication.clipboard()  # Get the clipboard
 
     def add_message(self, sender, text, with_play_button):
         message_widget = QWidget()
@@ -355,7 +358,18 @@ class ChatDisplayWidget(QWidget):
             play_button.clicked.connect(lambda: self.play_tts_function(text))  # Call the passed function
             message_layout.addWidget(play_button)
 
+            # Add the "Copy Text" button
+            copy_button = QPushButton("Copy Text")
+            copy_button.setFixedSize(110, 35)
+            copy_button.clicked.connect(lambda: self.copy_text(text))
+            message_layout.addWidget(copy_button)
+
         self.layout.addWidget(message_widget)
+
+    # Function to copy text to clipboard
+    def copy_text(self, text):
+        self.clipboard.setText(text)
+        QMessageBox.information(self, "Copied", "Text copied to clipboard.")
 
     def clear(self):
         for i in reversed(range(self.layout.count())):
