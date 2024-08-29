@@ -3,11 +3,13 @@ import os
 import re
 import requests
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTextEdit, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
-                             QWidget, QLabel, QSpinBox, QMessageBox, QComboBox, QFileDialog, QProgressBar, QApplication)
+                             QWidget, QLabel, QSpinBox, QMessageBox, QComboBox, QFileDialog, QProgressBar, QApplication,
+                             QScrollArea)
 from PyQt5.QtGui import QFont, QPalette, QColor
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot, QTimer
 import fitz  # PyMuPDF for PDF handling
 import pyttsx3  # Import the text-to-speech library
+import weakref  # Import the weakref module
 
 class LlamaThread(QObject):
     response_signal = pyqtSignal(str)
@@ -64,6 +66,11 @@ class ChatWindow(QMainWindow):
         self.llama_thread = None  # Initialize the thread object
         self.thread = None  # Initialize the QThread object
         self.tts_engine = pyttsx3.init()  # Initialize the text-to-speech engine
+        self.auto_mode = False
+        self.threads = []  # List to keep track of all threads using weak references
+        self.cleanup_timer = QTimer()  # Create a timer for cleanup
+        self.cleanup_timer.timeout.connect(self.cleanup_finished_threads)
+        self.cleanup_timer.start(1000)  # Start the timer with a 1-second interval
         self.setup_ui()
 
     def setup_ui(self):
@@ -72,7 +79,7 @@ class ChatWindow(QMainWindow):
 
         layout = QVBoxLayout()
 
-        # Model loading button (CUDA-related code removed)
+        # Model loading button
         load_layout = QHBoxLayout()
         self.load_model_button = QPushButton("Load Model")
         self.load_model_button.clicked.connect(self.load_model)
@@ -86,7 +93,10 @@ class ChatWindow(QMainWindow):
 
         # Chat display
         self.chat_display = ChatDisplayWidget(self.play_tts)  # Pass play_tts function
-        layout.addWidget(self.chat_display)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(self.chat_display)
+        layout.addWidget(scroll_area)
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -114,12 +124,15 @@ class ChatWindow(QMainWindow):
         self.token_spinbox.setRange(100, 4096)
         self.token_spinbox.setValue(self.max_tokens)
         self.token_spinbox.valueChanged.connect(self.update_max_tokens)
+        self.auto_mode_button = QPushButton("Auto Mode")
+        self.auto_mode_button.clicked.connect(self.toggle_auto_mode)
         self.download_code_button = QPushButton("Download Code")
         self.download_code_button.clicked.connect(self.download_code)
         self.download_code_button.setEnabled(False)
         control_layout.addWidget(self.clear_button)
         control_layout.addWidget(self.token_label)
         control_layout.addWidget(self.token_spinbox)
+        control_layout.addWidget(self.auto_mode_button)
         control_layout.addWidget(self.download_code_button)
         layout.addLayout(control_layout)
 
@@ -197,9 +210,17 @@ class ChatWindow(QMainWindow):
         self.input_field.clear()
 
         # Stop any running thread before starting a new one
-        if self.thread and self.thread.isRunning():
+        # Check for a valid weak reference in the self.threads list
+        for thread_ref in self.threads[:]: 
+            thread = thread_ref()
+            if thread is not None and thread.isRunning():
+                thread.quit()
+                thread.wait(1000)  # Add a timeout to wait()
+
+        # Now check if self.thread is valid before accessing it
+        if self.thread is not None and self.thread.isRunning():
             self.thread.quit()
-            self.thread.wait()
+            self.thread.wait(1000)
             self.thread = None  # Reset thread reference
 
         # Prepare the prompt
@@ -223,7 +244,12 @@ class ChatWindow(QMainWindow):
         return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
     def process_chunk(self, chunk):
-        self.llama_thread = LlamaThread(self.model, chunk, min(self.max_tokens, 2043), self.temperature)
+        if self.auto_mode:
+            max_tokens = self.calculate_auto_tokens(chunk)
+        else:
+            max_tokens = self.max_tokens
+
+        self.llama_thread = LlamaThread(self.model, chunk, min(max_tokens, 2043), self.temperature)
         self.thread = QThread()
         self.llama_thread.moveToThread(self.thread)
         self.thread.started.connect(self.llama_thread.generate_response)
@@ -231,8 +257,16 @@ class ChatWindow(QMainWindow):
         self.llama_thread.error_signal.connect(self.handle_error)
         self.llama_thread.progress_signal.connect(self.update_progress)
         self.llama_thread.finished.connect(self.on_thread_finished)
-        self.thread.finished.connect(self.thread.deleteLater)
-        self.thread.finished.connect(self.llama_thread.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)  # Clean up the thread when it finishes
+        self.thread.finished.connect(self.llama_thread.deleteLater)  # Clean up the llama thread when it finishes
+
+        # Add a weak reference to the thread
+        thread_ref = weakref.ref(self.thread)
+        self.threads.append(thread_ref)
+
+        self.adjust_tokens = False  # Initialize the flag
+        self.current_tokens_used = 0  # Initialize the token counter
+
         self.thread.start()
 
         self.send_button.setEnabled(False)
@@ -242,6 +276,16 @@ class ChatWindow(QMainWindow):
     def on_thread_finished(self):
         self.send_button.setEnabled(True)
         self.progress_bar.setValue(100)
+
+        # Remove the thread reference after handling the response
+        for thread in self.threads[:]:  # Iterate over a copy
+            if thread() is None:
+                self.threads.remove(thread)
+
+        if self.adjust_tokens:
+            self.adjust_tokens = False
+            # Create a new thread with the adjusted max_tokens
+            self.process_chunk(self.conversation[-1])  # Process the last message again
 
     def handle_response(self, response):
         self.llama_thread.response_signal.disconnect(self.handle_response)  # Disconnect after using it
@@ -257,6 +301,11 @@ class ChatWindow(QMainWindow):
             self.send_message()  # Retry generating a response
         self.send_button.setEnabled(True)
         self.progress_bar.setValue(100)
+
+        # Remove the thread reference after handling the response
+        for thread in self.threads[:]:  # Iterate over a copy
+            if thread() is None:
+                self.threads.remove(thread)
 
     def handle_error(self, error_message):
         QMessageBox.warning(self, "Error", f"An error occurred: {error_message}")
@@ -279,11 +328,14 @@ class ChatWindow(QMainWindow):
                 self.chat_display.add_message("AI", message, True)
 
     def clear_conversation(self):
-        # Stop any running thread before clearing
-        if self.thread and self.thread.isRunning():
-            self.thread.quit()
-            self.thread.wait()
-            self.thread = None  # Reset thread reference
+        # Stop all running threads before clearing
+        for thread in self.threads[:]:  # Iterate over a copy
+            if thread() is not None and thread().isRunning():
+                thread().quit()
+                thread().wait(1000)  # Add a timeout to wait()
+
+        # Clear the list after waiting
+        self.threads.clear()
 
         self.conversation = [self.system_prompt]
         self.token_count = 0
@@ -291,6 +343,7 @@ class ChatWindow(QMainWindow):
         self.current_python_code = None
         self.uploaded_file_content = None
         self.download_code_button.setEnabled(False)
+        self.thread = None  # Reset the self.thread reference
 
     def update_max_tokens(self, value):
         self.max_tokens = value
@@ -328,6 +381,55 @@ class ChatWindow(QMainWindow):
     def play_tts(self, text):
         self.tts_engine.say(text)
         self.tts_engine.runAndWait()
+
+    def toggle_auto_mode(self):
+        self.auto_mode = not self.auto_mode
+        if self.auto_mode:
+            self.auto_mode_button.setText("Manual Mode")
+        else:
+            self.auto_mode_button.setText("Auto Mode")
+
+    def calculate_auto_tokens(self, chunk):
+        # More sophisticated token count estimation
+        word_count = len(chunk.split())
+        sentence_count = len(re.split(r'(?<=\.|\?|\!)\s', chunk))
+
+        # Add keyword analysis if needed
+        # keyword_count = ...
+
+        # Estimate tokens based on word count, sentence count, and potential keyword count
+        estimated_tokens = word_count * 1.5 + sentence_count * 0.5  # Adjust multipliers
+
+        # Adjust token count based on desired response length
+        if estimated_tokens > self.max_tokens:
+            estimated_tokens = self.max_tokens  # Cap at the user-defined maximum
+
+        # Handle cases where estimated_tokens is too low
+        if estimated_tokens < 100:  # Set a minimum token count
+            estimated_tokens = 100
+
+        return int(estimated_tokens)
+
+    def closeEvent(self, event):
+        # Stop all running threads before closing
+        for thread in self.threads[:]:  # Iterate over a copy
+            if thread() is not None and thread().isRunning():
+                thread().quit()
+                thread().wait(1000)  # Add a timeout to wait()
+
+        # Clear the list after waiting
+        self.threads.clear()
+
+        # Stop the cleanup timer
+        self.cleanup_timer.stop()
+
+        event.accept()
+
+    def cleanup_finished_threads(self):
+        # Remove references to finished threads from the list using weak references
+        for thread in self.threads[:]:
+            if thread() is None:
+                self.threads.remove(thread)
 
 class ChatDisplayWidget(QWidget):
     def __init__(self, play_tts_function):  # Add play_tts_function as an argument
@@ -379,4 +481,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = ChatWindow()
     window.show()
-    sys.exit(app.exec_())
+    app.exec_()
