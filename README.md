@@ -28,7 +28,7 @@ To run this application, you'll need to install the following libraries:
 2. llama-cpp-python: For interfacing with the Llama models
 3. PyMuPDF (fitz): For handling PDF files
 
-You can install these libraries using pip: "pip install PyQt5 llama-cpp-python PyMuPDF"
+You can install these libraries using pip: "pip install PyQt5 llama-cpp-python PyMuPDF pyttsx3"
 
 ## How to Run the Code
 
