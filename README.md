@@ -17,8 +17,9 @@ Key features include:
 5. **Code Extraction**: Automatically detects Python code in AI responses and allows downloading.
 6. **Progress Indication**: Shows the progress of AI response generation.
 7. **Conversation Management**: Option to clear the conversation history.
-8. **Play response**: Option to play the AI response.
+8. **Text2Speech**: Option to play the AI response.
 9. **Copy text**: Option to copy the text of the AI response.
+10. **Save/load conversation**: Option to save and load previous conversations. 
 
 ## Libraries and Dependencies
 
@@ -26,7 +27,8 @@ To run this application, you'll need to install the following libraries:
 
 1. PyQt5: For the graphical user interface
 2. llama-cpp-python: For interfacing with the Llama models
-3. PyMuPDF (fitz): For handling PDF files
+3. PyMuPDF (fitz): For handling PDF files.
+4. pyttsx3: Text to speech.
 
 You can install these libraries using pip: "pip install PyQt5 llama-cpp-python PyMuPDF pyttsx3"
 
@@ -48,6 +50,7 @@ You can install these libraries using pip: "pip install PyQt5 llama-cpp-python P
 4. **Adjust Settings**: You can modify the max tokens and temperature using the controls at the bottom of the window.
 5. **Download Code**: If the AI generates Python code, you can download it using the "Download Code" button.
 6. **Clear Conversation**: Use the "Clear Conversation" button to start a new chat session.
+7. **Auto/Menual mode**: Use auto or menual mode to for tokens count.
 
 ## Note
 
