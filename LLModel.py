@@ -4,17 +4,19 @@ import re
 import requests
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTextEdit, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
                              QWidget, QLabel, QSpinBox, QMessageBox, QComboBox, QFileDialog, QProgressBar, QApplication,
-                             QScrollArea)
+                             QScrollArea, QMenu, QAction)
 from PyQt5.QtGui import QFont, QPalette, QColor
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot, QTimer
 import fitz  # PyMuPDF for PDF handling
 import pyttsx3  # Import the text-to-speech library
 import weakref  # Import the weakref module
+import json
+
 
 class LlamaThread(QObject):
     response_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int)
+    progress_signal = pyqtSignal(int, int)
     finished = pyqtSignal()
 
     def __init__(self, model, prompt, max_tokens, temperature):
@@ -23,6 +25,7 @@ class LlamaThread(QObject):
         self.prompt = prompt
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.token_count = 0
 
     @pyqtSlot()
     def generate_response(self):
@@ -32,15 +35,25 @@ class LlamaThread(QObject):
                 self.prompt,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
-                stop=["\nYou:"],
+                stop=["\nHuman:", "\nYou:"],  # Add multiple stop sequences
                 stream=True
             )
             full_text = ""
-            for i, chunk in enumerate(response):
-                full_text += chunk['choices'][0]['text']
-                progress = min(100, int((i / self.max_tokens) * 100))
-                self.progress_signal.emit(progress)
-            
+            for chunk in response:
+                text = chunk['choices'][0]['text']
+                full_text += text
+                self.token_count += len(text.split())
+                progress = min(100, int((self.token_count / self.max_tokens) * 100))
+                self.progress_signal.emit(progress, self.token_count)
+                
+                # Check for natural stopping points
+                if text.endswith(('.', '!', '?', '\n')) and len(full_text.split()) >= min(100, self.max_tokens):
+                    break
+                
+                # Stop if we've reached or exceeded max_tokens
+                if self.token_count >= self.max_tokens:
+                    break
+
             print("LlamaThread: Response generated successfully.")
             print("Extracted Text:", full_text)
             self.response_signal.emit(full_text)
@@ -71,13 +84,27 @@ class ChatWindow(QMainWindow):
         self.cleanup_timer = QTimer()  # Create a timer for cleanup
         self.cleanup_timer.timeout.connect(self.cleanup_finished_threads)
         self.cleanup_timer.start(1000)  # Start the timer with a 1-second interval
+        self.conversation_history_file = "conversation_history.json"  # Filename for conversation history
+        # Initialize chat_display here
+        self.chat_display = ChatDisplayWidget(self.play_tts)  # Initialize chat_display
+        self.load_conversation()  # Load conversation history on startup
         self.setup_ui()
+
 
     def setup_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
 
         layout = QVBoxLayout()
+
+        # File menu
+        self.file_menu = self.menuBar().addMenu("File")
+        self.save_conversation_action = QAction("Save Conversation", self)
+        self.save_conversation_action.triggered.connect(self.save_conversation)
+        self.load_conversation_action = QAction("Load Conversation", self)
+        self.load_conversation_action.triggered.connect(self.load_conversation)
+        self.file_menu.addAction(self.save_conversation_action)
+        self.file_menu.addAction(self.load_conversation_action)
 
         # Model loading button
         load_layout = QHBoxLayout()
@@ -92,7 +119,7 @@ class ChatWindow(QMainWindow):
         layout.addWidget(self.upload_file_button)
 
         # Chat display
-        self.chat_display = ChatDisplayWidget(self.play_tts)  # Pass play_tts function
+        # self.chat_display = ChatDisplayWidget(self.play_tts)  # Pass play_tts function
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(self.chat_display)
@@ -103,6 +130,10 @@ class ChatWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
+
+        # Token count label
+        self.token_count_label = QLabel("Tokens Processed: 0")
+        layout.addWidget(self.token_count_label)
 
         # Input area
         input_layout = QHBoxLayout()
@@ -176,10 +207,18 @@ class ChatWindow(QMainWindow):
         model_path, _ = QFileDialog.getOpenFileName(self, "Select Model File", "", "GGUF Files (*.gguf)")
         if model_path:
             try:
-                from llama_cpp import Llama
-                self.model = Llama(model_path=model_path, n_ctx=2048)  # No need for n_gpu_layers
-                QMessageBox.information(self, "Success", f"Model loaded successfully!\nPath: {model_path}")
-                self.send_button.setEnabled(True)
+                import os
+                # Get the CUDA path from environment variables
+                cuda_path = os.environ.get("CUDA_PATH")
+
+                if cuda_path:
+                    # Use the CUDA path from environment variables
+                    from llama_cpp import Llama
+                    self.model = Llama(model_path=model_path, n_ctx=2048, cuda_path=cuda_path)
+                    QMessageBox.information(self, "Success", f"Model loaded successfully!\nPath: {model_path}")
+                    self.send_button.setEnabled(True)
+                else:
+                    QMessageBox.critical(self, "Error", "CUDA_PATH environment variable not found. Please set it.")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load the model: {str(e)}")
 
@@ -266,11 +305,13 @@ class ChatWindow(QMainWindow):
 
         self.adjust_tokens = False  # Initialize the flag
         self.current_tokens_used = 0  # Initialize the token counter
+        self.total_tokens = 0  # Initialize the total tokens used
 
         self.thread.start()
 
         self.send_button.setEnabled(False)
         self.progress_bar.setValue(0)
+        self.token_count_label.setText("Tokens Processed: 0")  # Reset token count label
 
     @pyqtSlot()
     def on_thread_finished(self):
@@ -291,10 +332,32 @@ class ChatWindow(QMainWindow):
         self.llama_thread.response_signal.disconnect(self.handle_response)  # Disconnect after using it
 
         if self.validate_response(response):
-            self.conversation.append(f"AI: {response}")  # Append the response with "AI: " prefix
-            self.token_count += len(response.split())
-            self.update_chat_display()
-            self.check_for_python_code(response)
+            # Check if the response is complete or not
+            if response.endswith("AI: "):
+                # If it doesn't end with "AI: ", it's not complete.
+                # So we need to continue processing.
+                self.conversation.append(f"AI: {response}")
+                self.token_count += len(response.split())
+                self.update_chat_display()
+                self.check_for_python_code(response)
+            else:
+                # If the response is complete, append it to conversation
+                self.conversation.append(f"AI: {response}") 
+                self.token_count += len(response.split())
+                self.update_chat_display()
+                self.check_for_python_code(response)
+
+            self.total_tokens += len(response.split())  # Update total_tokens
+
+            if self.total_tokens > self.max_tokens:
+                self.conversation[-1] = self.conversation[-1][:self.max_tokens]  # Truncate the response
+                self.update_chat_display()
+                # Add a message to the conversation indicating truncation
+                self.conversation.append(
+                    f"AI: My response has been truncated due to exceeding the maximum token limit. "
+                    f"Please adjust the maximum token limit or provide a shorter query."
+                )
+                self.update_chat_display()
         else:
             self.conversation.append("AI: I apologize, but I couldn't generate an appropriate response. Let me try again.")
             self.update_chat_display()
@@ -307,13 +370,17 @@ class ChatWindow(QMainWindow):
             if thread() is None:
                 self.threads.remove(thread)
 
+
     def handle_error(self, error_message):
-        QMessageBox.warning(self, "Error", f"An error occurred: {error_message}")
+        # Display a more informative error message
+        QMessageBox.critical(self, "Error", f"An error occurred: {error_message}")
         self.send_button.setEnabled(True)
         self.progress_bar.setValue(0)
 
-    def update_progress(self, value):
+    def update_progress(self, value, token_count):
         self.progress_bar.setValue(value)
+        # Update the token count label
+        self.token_count_label.setText(f"Tokens Processed: {token_count}") 
 
     def update_chat_display(self):
         # Clear the existing messages
@@ -390,23 +457,18 @@ class ChatWindow(QMainWindow):
             self.auto_mode_button.setText("Auto Mode")
 
     def calculate_auto_tokens(self, chunk):
-        # More sophisticated token count estimation
         word_count = len(chunk.split())
         sentence_count = len(re.split(r'(?<=\.|\?|\!)\s', chunk))
 
-        # Add keyword analysis if needed
-        # keyword_count = ...
+        # Increase the base estimation
+        estimated_tokens = word_count * 2 + sentence_count * 1
 
-        # Estimate tokens based on word count, sentence count, and potential keyword count
-        estimated_tokens = word_count * 1.5 + sentence_count * 0.5  # Adjust multipliers
+        # Ensure a minimum token count that's higher than the current issue
+        min_tokens = max(200, self.max_tokens // 10)
+        estimated_tokens = max(estimated_tokens, min_tokens)
 
-        # Adjust token count based on desired response length
-        if estimated_tokens > self.max_tokens:
-            estimated_tokens = self.max_tokens  # Cap at the user-defined maximum
-
-        # Handle cases where estimated_tokens is too low
-        if estimated_tokens < 100:  # Set a minimum token count
-            estimated_tokens = 100
+        # Cap at the user-defined maximum
+        estimated_tokens = min(estimated_tokens, self.max_tokens)
 
         return int(estimated_tokens)
 
@@ -430,6 +492,21 @@ class ChatWindow(QMainWindow):
         for thread in self.threads[:]:
             if thread() is None:
                 self.threads.remove(thread)
+
+    def save_conversation(self):
+        with open(self.conversation_history_file, 'w') as f:
+            json.dump(self.conversation, f)
+        QMessageBox.information(self, "Conversation Saved", "Conversation history saved successfully.")
+
+    def load_conversation(self):
+        try:
+            with open(self.conversation_history_file, 'r') as f:
+                self.conversation = json.load(f)
+            self.update_chat_display()  # Update the chat display with loaded conversation
+            QMessageBox.information(self, "Conversation Loaded", "Conversation history loaded successfully.")
+        except FileNotFoundError:
+            QMessageBox.warning(self, "Conversation Not Found", "No conversation history found.")
+
 
 class ChatDisplayWidget(QWidget):
     def __init__(self, play_tts_function):  # Add play_tts_function as an argument
@@ -477,8 +554,9 @@ class ChatDisplayWidget(QWidget):
         for i in reversed(range(self.layout.count())):
             self.layout.itemAt(i).widget().setParent(None)
 
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = ChatWindow()
+    window = ChatWindow()  # Define ChatWindow correctly
     window.show()
     app.exec_()
