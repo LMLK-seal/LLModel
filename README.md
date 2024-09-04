@@ -1,6 +1,6 @@
 # LLModel: 100% Private-Offline chat!
 
-![LLModel Chat Demo]()
+![LLModel Chat Demo](https://raw.githubusercontent.com/LMLK-seal/LLModel/main/LLModel1.gif)
 
 LLModel Chat is a CPU only PyQt5-based graphical user interface (GUI) application that allows users to interact with a local large language model (LLM) using the Llama library. This application provides a user-friendly interface for loading and using LLM models, engaging in conversations, and even processing uploaded text or PDF files as context for the AI responses.
 
