@@ -50,7 +50,7 @@ You can install these libraries using pip: "pip install PyQt5 llama-cpp-python P
 4. **Adjust Settings**: You can modify the max tokens and temperature using the controls at the bottom of the window.
 5. **Download Code**: If the AI generates Python code, you can download it using the "Download Code" button.
 6. **Clear Conversation**: Use the "Clear Conversation" button to start a new chat session.
-7. **Auto/Menual mode**: Use auto or menual mode to for tokens count.
+7. **Auto/Menual mode**: Use auto or menual mode for tokens count.
 
 ## Note
 
@@ -58,6 +58,13 @@ This application requires a compatible GGUF model file to function. Make sure yo
 
 GGUF libraries: 
 https://huggingface.co/models?library=gguf
+
+Recommended GGUF models:
+1. Phi-3-mini-4k-instruct-gguf (Q5_K_M)
+https://huggingface.co/bartowski/Phi-3.1-mini-4k-instruct-GGUF
+
+2. Meta-Llama-3.1-8B-Instruct-GGUF (Q5_K_M)
+https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF
 
 ## Contribution
 
