@@ -30,7 +30,10 @@ To run this application, you'll need to install the following libraries:
 3. PyMuPDF (fitz): For handling PDF files.
 4. pyttsx3: Text to speech.
 
-You can install these libraries using pip: "pip install PyQt5 llama-cpp-python PyMuPDF pyttsx3"
+You can install these libraries using pip: 
+```
+   pip install PyQt5 llama-cpp-python PyMuPDF pyttsx3
+   ```
 
 ## How to Run the Code
 
