@@ -11,7 +11,7 @@ import fitz  # PyMuPDF for PDF handling
 import pyttsx3  # Import the text-to-speech library
 import weakref  # Import the weakref module
 import json
-
+from llama_cpp import Llama  # Import llama_cpp for CPU-based model loading
 
 class LlamaThread(QObject):
     response_signal = pyqtSignal(str)
@@ -150,7 +150,7 @@ class ChatWindow(QMainWindow):
         control_layout = QHBoxLayout()
         self.clear_button = QPushButton("Clear Conversation")
         self.clear_button.clicked.connect(self.clear_conversation)
-        self.token_label = QLabel("Max Tokens:")
+        self.token_label = QLabel("Set Max Tokens:(Manual mode only)")
         self.token_spinbox = QSpinBox()
         self.token_spinbox.setRange(100, 4096)
         self.token_spinbox.setValue(self.max_tokens)
@@ -207,18 +207,9 @@ class ChatWindow(QMainWindow):
         model_path, _ = QFileDialog.getOpenFileName(self, "Select Model File", "", "GGUF Files (*.gguf)")
         if model_path:
             try:
-                import os
-                # Get the CUDA path from environment variables
-                cuda_path = os.environ.get("CUDA_PATH")
-
-                if cuda_path:
-                    # Use the CUDA path from environment variables
-                    from llama_cpp import Llama
-                    self.model = Llama(model_path=model_path, n_ctx=2048, cuda_path=cuda_path)
-                    QMessageBox.information(self, "Success", f"Model loaded successfully!\nPath: {model_path}")
-                    self.send_button.setEnabled(True)
-                else:
-                    QMessageBox.critical(self, "Error", "CUDA_PATH environment variable not found. Please set it.")
+                self.model = Llama(model_path=model_path, n_ctx=2048)
+                QMessageBox.information(self, "Success", f"Model loaded successfully!\nPath: {model_path}")
+                self.send_button.setEnabled(True)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load the model: {str(e)}")
 
